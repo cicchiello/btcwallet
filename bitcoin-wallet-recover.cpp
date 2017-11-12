@@ -68,6 +68,8 @@ int SHA256_Final(unsigned char *md, SHA256_CTX *c);
 #define ADDRESS_LENGTH 25
 const unsigned char *ripemd160Hash(unsigned char *buf, const unsigned char *data, int length);
 
+bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz);
+
 //"\x01\x03\x6B\x65\x79\x41\x04"
 
 #define STATE_FOUND_PUBKEY 6
@@ -179,11 +181,13 @@ static const char *toHexString(char *buf, const unsigned char *data, int len) {
 }
 
 static const char *toBase58String(char *buf, const unsigned char *data, int len) {
-  int i;
-  for(i = 0; i < len; i++) {
-    sprintf(buf+i*2,"%02x", data[i]);
+  size_t rlen;
+  bool stat = b58enc(buf, &rlen, data, len);
+  if (!stat) {
+    printf("ERROR:toBase58String: b58enc returned failure status\n");
+    return 0;
   }
-  buf[len*2] = 0;
+  buf[rlen] = 0;
   return buf;
 }
 
@@ -365,7 +369,7 @@ static const unsigned char *addressFromPub(unsigned char *addressBuf, const unsi
   checksum[0] = eripemd160_sha256_sha256[0];
   checksum[1] = eripemd160_sha256_sha256[1];
   checksum[2] = eripemd160_sha256_sha256[2];
-  checksum[3] = eripemd160_sha256_sha256[4];
+  checksum[3] = eripemd160_sha256_sha256[3];
 
   memcpy(addressBuf, eripemd160, RIPEMD160_DIGEST_LENGTH+1);
   memcpy(addressBuf+RIPEMD160_DIGEST_LENGTH+1, checksum, 4);
@@ -661,6 +665,7 @@ static void tests() {
   const char *expectedERipemd160_sha256_sha256_Str = "d61967f63c7dd183914a4ae452c9f6ad5d462ce3d277798075b107615c1a8a30";
   const char *expectedChecksumStr = "d61967f6";
   const char *expectedAddressStr = "00010966776006953d5567439e5e39f86a0d273beed61967f6";
+  const char *expectedBase58Str = "16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM";
   
   const unsigned char privkey[] = {
     0x18,0xE1,0x4A,0x7B, 0x6A,0x30,0x7F,0x42,
@@ -942,6 +947,39 @@ static void tests() {
       exit(-1);
     }
   }
+
+  unsigned char addressBuf[ADDRESS_LENGTH+2];
+  addressBuf[ADDRESS_LENGTH+1] = 0xcc;
+  const unsigned char *addressTest = addressFromPub(addressBuf, pubkey, 64);
+  if (addressBuf[ADDRESS_LENGTH+1] != 0xcc) {
+    printf("ERROR:tests: generation of the address overwrote the buffer\n");
+    exit(-1);
+  }
+  if (memcmp(addressTest, address, ADDRESS_LENGTH) != 0) {
+    printf("ERROR:tests: address is wrong\n");
+    exit(-1);
+  }
+  char address_StrBuf[ADDRESS_LENGTH*2+2];
+  address_StrBuf[ADDRESS_LENGTH*2+1] = 0x7f;
+  const char *addressStr = toHexString(address_StrBuf, addressTest, ADDRESS_LENGTH);
+  if (strcmp(addressStr, expectedAddressStr) != 0) {
+    printf("addressStr        : %s\n", addressStr);
+    printf("expectedAddressStr: %s\n", expectedAddressStr);
+    printf("ERROR:tests: test of address assembly returned unexpected result!\n");
+    printf("\n");
+    exit(-1);
+  }
+
+  char base58StrBuf[50]; // shouldn't need that many bytes, but the exact number isn't known yet
+  const char *base58Str = toBase58String(base58StrBuf, addressTest, ADDRESS_LENGTH);
+  if (strcmp(base58Str, expectedBase58Str) != 0) {
+    printf("base58Str: %s\n", base58Str);
+    printf("expectedBase58Str: %s\n", expectedBase58Str);
+    printf("ERROR:tests: conversion to base58 returned unexpected result!\n");
+    printf("\n");
+    exit(-1);
+  }
+  
 }
 
 
