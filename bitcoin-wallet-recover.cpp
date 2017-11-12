@@ -124,7 +124,6 @@ static void show_progress(void) {
 
 static int refill_buf(void) {
 	int ret;
-	//printf("refill_buf: fill = %i pos = %i\n", buffill, bufpos);
 	if(bufpos > BUF_WATERMARK) {
 		memcpy(buf, buf + BUF_SEGMENT, BUF_LEN-BUF_SEGMENT);
 		buffill -= BUF_SEGMENT;
@@ -253,6 +252,7 @@ static void save_recovered_key(unsigned char* pubkey, unsigned char* privkey, bo
 	}
 }
 
+#ifdef USE_PYTHON
 static const char *pubFromPrivPython(char *pubkeyBuf, int pubkeyBuflen, const char *privkeyStr) {
   if (pubkeyBuflen < 129) {
     printf("ERROR:pubFromPrivPython: pubkeyBuflen must be at least 129!\n");
@@ -277,6 +277,7 @@ static const char *pubFromPrivPython(char *pubkeyBuf, int pubkeyBuflen, const ch
   printf("ERROR:pubFromPrivPython: Didn't get expected response from pub-from-priv.py\n");
   return 0;
 }
+#endif
 
 
 static const char *pubFromPriv(char *pubkeyBuf, int pubkeyBuflen, const unsigned char *privkey) {
@@ -377,17 +378,22 @@ static const unsigned char *addressFromPub(unsigned char *addressBuf, const unsi
 }
 
 
-static void dumpPotentialPrivkey(unsigned char* pprivkey, int len) {
-  char hexBuf[len*2+1], ppubkeyStrBuf[129], ppubkey2StrBuf[129];
-  const char *pprivkeyStr = toHexString(hexBuf, pprivkey, len);
-  const char *ppubkeyStr = pubFromPrivPython(ppubkeyStrBuf, 129, pprivkeyStr);
-  const char *ppubkey2Str = pubFromPriv(ppubkey2StrBuf, 129, pprivkey);
-  if ((strlen(ppubkeyStr) != strlen(ppubkey2Str)) || (strcmp(ppubkeyStr, ppubkey2Str) != 0)) {
+static void dumpPotentialPrivkey(unsigned char* pprivkey) {
+  char hexBuf[32*2+1], ppubkeyStrBuf[129];
+  const char *pprivkeyStr = toHexString(hexBuf, pprivkey, 32);
+  const char *ppubkeyStr = pubFromPriv(ppubkeyStrBuf, 129, pprivkey);
+  
+#ifdef USE_PYTHON  
+  char ppubkey3StrBuf[129];
+  const char *ppubkey3Str = pubFromPrivPython(ppubkeyStrBuf, 129, pprivkeyStr);
+  if ((strlen(ppubkeyStr) != strlen(ppubkey3Str)) || (strcmp(ppubkey3Str, ppubkeyStr) != 0)) {
     printf("ERROR:dumpPotentialPrivkey: the 2 pubkey generation approaches returned different pubkeys!?!?\n");
-    printf("ppubkeyStr : %s\n", ppubkeyStr);
-    printf("ppubkeyStr2: %s\n", ppubkey2Str);
+    printf("ppubkey3Str : %s\n", ppubkey3Str);
+    printf("ppubkeyStr: %s\n", ppubkeyStr);
     exit(-1);
   }
+#endif
+  
   unsigned char ppubkeyBuf[65];
   const unsigned char *ppubkey = fromHexString(ppubkeyBuf, ppubkeyStr, 128);
   
@@ -397,8 +403,22 @@ static void dumpPotentialPrivkey(unsigned char* pprivkey, int len) {
   char addressBase58Buf[50]; // will be something less than 25 characters
   const char *addressBase58 = toBase58String(addressBase58Buf, address, 25);
   
-  printf("INFO:dumpPotentialPrivkey: privkey,pubkey,address = %s,%s,%s\n",pprivkeyStr, ppubkeyStr, addressBase58);
+  printf("RESULT:dumpPotentialPrivkey: privkey,pubkey,address = %s,%s,%s\n",pprivkeyStr, ppubkeyStr, addressBase58);
 }
+
+static void dumpPotentialPubkey(const unsigned char* ppubkey) {
+  char ppubkeyStrBuf[64+1];
+  const char *ppubkeyStr = toHexString(ppubkeyStrBuf, ppubkey, 64);
+  
+  unsigned char addressBuf[ADDRESS_LENGTH+1];
+  const unsigned char *address = addressFromPub(addressBuf, ppubkey, 64);
+
+  char addressBase58Buf[50]; // will be something less than 25 characters
+  const char *addressBase58 = toBase58String(addressBase58Buf, address, 25);
+  
+  printf("RESULT:dumpPotentialPubkey: privkey,pubkey,address = UNKNOWN,%s,%s\n", ppubkeyStr, addressBase58);
+}
+
 
 // really dirty hack to force a rescan at next startup
 static void invalidate_best_block() {
@@ -422,18 +442,21 @@ static void invalidate_best_block() {
 static void try_recover_key(key_info *kinfo) {
 	if(kinfo->found_pub && kinfo->found_priv && !kinfo->recovered) {
 		printf("INFO:try_recover_key: pubkey = "); dump_hex(&kinfo->pubkey[0], 64);
+		dumpPotentialPubkey(&kinfo->pubkey[0]);
 		printf("INFO:try_recover_key: privkey = "); dump_hex(&kinfo->privkey[0], 32);
+		dumpPotentialPrivkey(&kinfo->privkey[0]);
 		save_recovered_key(&kinfo->pubkey[0], &kinfo->privkey[0], false);
 		kinfo->recovered = 1;
 		num_recovered++; num_pend_pub--; 
 		if(!kinfo->recovered_comp) {
 		    num_pend_priv--;
 		} else {
-		    printf("TRACE:try_recover_key(1): num_pend_priv key: "); dump_hex(&kinfo->privkey[0], 32);
+//		    printf("TRACE:try_recover_key(1): num_pend_priv key: "); dump_hex(&kinfo->privkey[0], 32);
 		}
 	} else if(kinfo->found_pub_comp && kinfo->found_priv && !kinfo->recovered_comp) {
 		printf("INFO:try_recover_key: pubkey_comp = "); dump_hex(&kinfo->pubkey_comp[0], 33);
 		printf("INFO:try_recover_key: privkey = "); dump_hex(&kinfo->privkey[0], 32);
+		dumpPotentialPrivkey(&kinfo->privkey[0]);
 		save_recovered_key(&kinfo->pubkey_comp[0], &kinfo->privkey[0], true);
 		kinfo->recovered_comp = 1;
 		num_recovered++; num_pend_pub_comp--;
@@ -456,6 +479,7 @@ static void do_recover_privkey(int keypos) {
 		return;
 	}
 	memcpy(&privkey[0], buf+keypos, 32);
+	dumpPotentialPrivkey(buf+keypos);
 
 	keymap_iter iter = privkey_map.find(privkey);
 	if(iter != privkey_map.end()) {
@@ -473,26 +497,27 @@ static void do_recover_privkey(int keypos) {
 
 		const CryptoPP::ECP::Point& q = publicKey.GetPublicElement();
 		q.x.Encode(&gen_pubkey[0], 32); q.y.Encode(&gen_pubkey[32], 32);
+		dumpPotentialPubkey(&gen_pubkey[0]);
 
 		key_info* kinfo;
 		iter = pubkey_map.find(gen_pubkey);
 		if(iter != pubkey_map.end()) {
 			kinfo = iter->second;
-			printf("TRACE:do_recover_privkey: Found potential pubkey: "); dump_hex(&gen_pubkey[0], 64);
+			//printf("TRACE:do_recover_privkey: Found potential pubkey: "); dump_hex(&gen_pubkey[0], 64);
 		} else {
 			kinfo = new key_info();
 			kinfo->pubkey = gen_pubkey;
 			kinfo->found_pub = 0;
 			pubkey_map[gen_pubkey] = kinfo;
-			printf("TRACE:do_recover_privkey: derived potential pubkey: "); dump_hex(&gen_pubkey[0], 64);
+			//printf("TRACE:do_recover_privkey: derived potential pubkey: "); dump_hex(&gen_pubkey[0], 64);
 		}
 
 		kinfo->found_priv = 1; 
 		kinfo->privkey = privkey;
 		privkey_map[privkey] = kinfo;
 		num_pend_priv++;
-		printf("TRACE:do_recover_privkey: Found potential privkey: "); dump_hex(&privkey[0], 32);
-		dumpPotentialPrivkey(&privkey[0], 32);
+		//printf("TRACE:do_recover_privkey: Found potential privkey: "); dump_hex(&privkey[0], 32);
+		//dumpPotentialPrivkey(&privkey[0]);
 		try_recover_key(kinfo);
 	}
 }
@@ -504,13 +529,15 @@ static void do_recover_pubkey_uncomp(int keypos) {
 		return;
 	}
 	memcpy(&pubkey[0], buf+keypos, 64);
+	dumpPotentialPubkey(buf+keypos);
 
 	key_info* kinfo;
 	keymap_iter iter = pubkey_map.find(pubkey);
 	if(iter != pubkey_map.end()) {
 		kinfo = iter->second;
 		if(kinfo->found_pub) {
-		        printf("INFO:do_recover_pubkey_uncomp: Duplicate potential public key, skipping; dup pubkey = "); dump_hex(buf+keypos, 64);
+		        //printf("INFO:do_recover_pubkey_uncomp: Duplicate potential public key, skipping; dup pubkey = "); dump_hex(buf+keypos, 64);
+		  
 			num_dups++;
 			show_progress();
 			return;
@@ -550,13 +577,14 @@ static void do_recover_pubkey_comp(int keypos) {
 	}
 	publicKey.SetPublicElement(q);
 	q.x.Encode(&gen_pubkey[0], 32); q.y.Encode(&gen_pubkey[32], 32);
+	dumpPotentialPubkey(&gen_pubkey[0]);
 	
 	key_info* kinfo;
 	keymap_iter iter = pubkey_map.find(gen_pubkey);
 	if(iter != pubkey_map.end()) {
 		kinfo = iter->second;
 		if(kinfo->found_pub_comp) {
-		        printf("INFO:do_recover_pubkey_comp: Duplicate potential compressed public key, skipping; uncompressed dup pubkey = "); dump_hex(&gen_pubkey[0], 32);
+		        //printf("INFO:do_recover_pubkey_comp: Duplicate potential compressed public key, skipping; uncompressed dup pubkey = "); dump_hex(&gen_pubkey[0], 32);
 			num_dups++;
 			show_progress();
 			return;
@@ -726,7 +754,8 @@ static void tests() {
     printf("\n");
     exit(-1);
   }
-  
+
+#ifdef USE_PYTHON  
   char pubkeyStrBuf[129];
   const char *pubkeyStr = pubFromPrivPython(pubkeyStrBuf, 129, privkeyStr);
   if (pubkeyStr == 0) {
@@ -758,6 +787,7 @@ static void tests() {
     printf("ERROR:tests: fromHexString returned unexpected data\n");
     exit(-1);
   }
+#endif
   
   char cryptoStrBuf[130];
   cryptoStrBuf[129] = 0x7f;
@@ -766,8 +796,8 @@ static void tests() {
     printf("ERROR:tests: pubFromPriv overwrote the supplied buffer\n");
     exit(-1);
   }
-  if ((strlen(cryptoStr) != strlen(pubkeyStr)) || (strcmp(cryptoStr, pubkeyStr) != 0)) {
-    printf("pubkeyStr  : %s\n", pubkeyStr);
+  if ((strlen(cryptoStr) != strlen(expectedPubkeyStr)) || (strcmp(cryptoStr, expectedPubkeyStr) != 0)) {
+    printf("pubkeyStr  : %s\n", expectedPubkeyStr);
     printf("cryptoStr: %s\n", cryptoStr);
     printf("ERROR:tests: test of crypto-based pubkey from privkey returned unexpected result!\n");
     printf("\n");
