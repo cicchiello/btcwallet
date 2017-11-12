@@ -35,6 +35,8 @@ WITH THE SOFTWARE.
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <string.h>
+#include <openssl/sha.h>
+#include <openssl/crypto.h>
 
 #include <db.h>
 
@@ -60,6 +62,11 @@ struct key_info {
 		     recovered(0), recovered_comp(0) {} 
 };
 
+int SHA256_Final(unsigned char *md, SHA256_CTX *c);
+
+#define RIPEMD160_DIGEST_LENGTH 20
+#define ADDRESS_LENGTH 25
+const unsigned char *ripemd160Hash(unsigned char *buf, const unsigned char *data, int length);
 
 //"\x01\x03\x6B\x65\x79\x41\x04"
 
@@ -143,7 +150,35 @@ static int refill_buf(void) {
 	}
 }
 
+static const unsigned char *fromHexString(unsigned char *buf, const char *hexString, int len) {
+  int i = 0, bufi = 0;
+  for(i = 0; i < len; i += 2) {
+    unsigned char b = 0;
+    char c = hexString[i];
+    if ((c >= 'a') && (c <= 'f')) c = c - 'a' + 10;
+    if ((c >= 'A') && (c <= 'F')) c = c - 'A' + 10;
+    if ((c >= '0') && (c <= '9')) c = c - '0';
+    b += c * 16;
+    c = hexString[i+1];
+    if ((c >= 'a') && (c <= 'f')) c = c - 'a' + 10;
+    if ((c >= 'A') && (c <= 'F')) c = c - 'A' + 10;
+    if ((c >= '0') && (c <= '9')) c = c - '0';
+    b += c;
+    buf[bufi++] = b;
+  }
+  return buf;
+}
+
 static const char *toHexString(char *buf, const unsigned char *data, int len) {
+  int i;
+  for(i = 0; i < len; i++) {
+    sprintf(buf+i*2,"%02x", data[i]);
+  }
+  buf[len*2] = 0;
+  return buf;
+}
+
+static const char *toBase58String(char *buf, const unsigned char *data, int len) {
   int i;
   for(i = 0; i < len; i++) {
     sprintf(buf+i*2,"%02x", data[i]);
@@ -262,73 +297,103 @@ static const char *pubFromPriv(char *pubkeyBuf, int pubkeyBuflen, const unsigned
 }
 
 
-static void tests() {
-  // using a known value to confirm working
-  // from: https://en.bitcoin.it/wiki/Technical_background_of_version_1_Bitcoin_addresses
-  const char *privkeyStr = "18e14a7b6a307f426a94f8114701e7c8e774e7f9a47e2c2035db29a206321725";
-  const unsigned char privkey[] = {
-    0x18,0xE1,0x4A,0x7B,
-    0x6A,0x30,0x7F,0x42,
-    0x6A,0x94,0xF8,0x11,
-    0x47,0x01,0xE7,0xC8,
-    0xE7,0x74,0xE7,0xF9,
-    0xA4,0x7E,0x2C,0x20,
-    0x35,0xDB,0x29,0xA2,
-    0x06,0x32,0x17,0x25
-  };
-  char hexTestBuf[65];
-  const char *hexTestStr = toHexString(hexTestBuf, privkey, 32);
-  if ((strlen(hexTestStr) != 64) || (strcmp(hexTestStr, privkeyStr) != 0)) {
-    printf("hexTestStr: %s\n", hexTestStr);
-    printf("privkeyStr: %s\n", privkeyStr);
-    printf("ERROR:tests: test of toHexString returned unexpected result!\n");
-    printf("\n");
-    exit(-1);
-  }
-  
-  char pubkeyStrBuf[129];
-  const char *pubkeyStr = pubFromPrivPython(pubkeyStrBuf, 129, privkeyStr);
-  if (pubkeyStr == 0) {
-    printf("ERROR:tests: test of pub-from-priv.py failed!\n");
-    printf("ERROR:tests: Please make sure the python program called pub-from-priv.py is in pwd\n");
-    printf("ERROR:tests: Please make sure that pub-from-priv.py is executable (chmod a+x pub-from-priv.py)\n");
-    printf("\n");
-    exit(-1);
-  }
-  const char *expected = "50863ad64a87ae8a2fe83c1af1a8403cb53f53e486d8511dad8a04887e5b23522cd470243453a299fa9e77237716103abc11a1df38855ed6f2ee187e9c582ba6";
-  if ((strlen(pubkeyStr) != strlen(expected)) || (strcmp(pubkeyStr, expected) != 0)) {
-    printf("pubkeyStr  : %s\n", pubkeyStr);
-    printf("expected: %s\n", expected);
-    printf("ERROR:tests: test of pub-from-priv.py returned unexpected result!\n");
-    printf("ERROR:tests: Please make sure the python program called pub-from-priv.py is in pwd\n");
-    printf("ERROR:tests: Please make sure that pub-from-priv.py is executable (chmod a+x pub-from-priv.py)\n");
-    printf("\n");
-    exit(-1);
-  }
+#ifdef REFERENCE
+// https://stackoverflow.com/questions/2262386/generate-sha256-with-openssl-and-c
+int calc_sha256 (char* path, char output[65])
+{
+    FILE* file = fopen(path, "rb");
+    if(!file) return -1;
 
-  char cryptoStrBuf[129];
-  const char *cryptoStr = pubFromPriv(cryptoStrBuf, 129, privkey);
-  if ((strlen(cryptoStr) != strlen(pubkeyStr)) || (strcmp(cryptoStr, pubkeyStr) != 0)) {
-    printf("pubkeyStr  : %s\n", pubkeyStr);
-    printf("cryptoStr: %s\n", cryptoStr);
-    printf("ERROR:tests: test of crypto-based pubkey from privkey returned unexpected result!\n");
-    printf("\n");
-    exit(-1);
-  }
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+    const int bufSize = 32768;
+    char* buffer = (char*) malloc(bufSize);
+    int bytesRead = 0;
+    if(!buffer) return -1;
+    while((bytesRead = fread(buffer, 1, bufSize, file)))
+    {
+        SHA256_Update(&sha256, buffer, bytesRead);
+    }
+    SHA256_Final(hash, &sha256);
+
+    sha256_hash_string(hash, output);
+    fclose(file);
+    free(buffer);
+    return 0;
+}
+#endif
+
+
+static const unsigned char *SHA256Hash(unsigned char *buf, const unsigned char *pubkey, int len) {
+  SHA256_CTX sha256;
+  SHA256_Init(&sha256);
+//  unsigned char prefix[] = {0x04};
+//  SHA256_Update(&sha256, prefix, 1);
+  SHA256_Update(&sha256, pubkey, len);
+  SHA256_Final(buf, &sha256);
+
+  return buf;
 }
 
+
+static const unsigned char *addressFromPub(unsigned char *addressBuf, const unsigned char *pubkey, int len) {
+  unsigned char sha256Buf[SHA256_DIGEST_LENGTH+1];
+  
+  unsigned char epubkey[len+1];
+  epubkey[0] = 0x04;
+  memcpy(epubkey+1, pubkey, len);
+  const unsigned char *sha256 = SHA256Hash(sha256Buf, epubkey, len+1);
+
+  unsigned char extendedRipemd160Buf[RIPEMD160_DIGEST_LENGTH+2];
+  unsigned char *ripemd160Buf = extendedRipemd160Buf+1;
+  // first byte will be hardcoded 0, per:
+  // https://en.bitcoin.it/wiki/Technical_background_of_version_1_Bitcoin_addresses
+  
+  extendedRipemd160Buf[0] = 0;
+  
+  const unsigned char *ripemd160 = ripemd160Hash(ripemd160Buf, sha256, SHA256_DIGEST_LENGTH);
+  const unsigned char *eripemd160 = ripemd160-1;
+
+  unsigned char eripemd160_sha256Buf[SHA256_DIGEST_LENGTH+1];
+  const unsigned char *eripemd160_sha256 = SHA256Hash(eripemd160_sha256Buf, eripemd160, RIPEMD160_DIGEST_LENGTH+1);
+
+  unsigned char eripemd160_sha256_sha256Buf[SHA256_DIGEST_LENGTH+1];
+  const unsigned char *eripemd160_sha256_sha256 = SHA256Hash(eripemd160_sha256_sha256Buf, eripemd160_sha256, SHA256_DIGEST_LENGTH);
+
+  unsigned char checksum[4];
+  checksum[0] = eripemd160_sha256_sha256[0];
+  checksum[1] = eripemd160_sha256_sha256[1];
+  checksum[2] = eripemd160_sha256_sha256[2];
+  checksum[3] = eripemd160_sha256_sha256[4];
+
+  memcpy(addressBuf, eripemd160, RIPEMD160_DIGEST_LENGTH+1);
+  memcpy(addressBuf+RIPEMD160_DIGEST_LENGTH+1, checksum, 4);
+  return addressBuf;
+}
+
+
 static void dumpPotentialPrivkey(unsigned char* pprivkey, int len) {
-  char hexBuf[len*2+1], ppubkey[129], ppubkey2[129];
+  char hexBuf[len*2+1], ppubkeyStrBuf[129], ppubkey2StrBuf[129];
   const char *pprivkeyStr = toHexString(hexBuf, pprivkey, len);
-  const char *ppubkeyStr = pubFromPrivPython(ppubkey, 129, pprivkeyStr);
-  const char *ppubkey2Str = pubFromPriv(ppubkey2, 129, pprivkey);
+  const char *ppubkeyStr = pubFromPrivPython(ppubkeyStrBuf, 129, pprivkeyStr);
+  const char *ppubkey2Str = pubFromPriv(ppubkey2StrBuf, 129, pprivkey);
   if ((strlen(ppubkeyStr) != strlen(ppubkey2Str)) || (strcmp(ppubkeyStr, ppubkey2Str) != 0)) {
     printf("ERROR:dumpPotentialPrivkey: the 2 pubkey generation approaches returned different pubkeys!?!?\n");
     printf("ppubkeyStr : %s\n", ppubkeyStr);
     printf("ppubkeyStr2: %s\n", ppubkey2Str);
     exit(-1);
   }
-  printf("INFO:dumpPotentialPrivkey: privkey,pubkey = %s,%s\n",pprivkeyStr, ppubkeyStr);
+  unsigned char ppubkeyBuf[65];
+  const unsigned char *ppubkey = fromHexString(ppubkeyBuf, ppubkeyStr, 128);
+  
+  unsigned char addressBuf[ADDRESS_LENGTH+1];
+  const unsigned char *address = addressFromPub(addressBuf, ppubkey, 64);
+
+  char addressBase58Buf[50]; // will be something less than 25 characters
+  const char *addressBase58 = toBase58String(addressBase58Buf, address, 25);
+  
+  printf("INFO:dumpPotentialPrivkey: privkey,pubkey,address = %s,%s,%s\n",pprivkeyStr, ppubkeyStr, addressBase58);
 }
 
 // really dirty hack to force a rescan at next startup
@@ -583,6 +648,303 @@ static void do_scan(void) {
 	}
 }
 
+
+static void tests() {
+  // using a known value to confirm working
+  // from: https://en.bitcoin.it/wiki/Technical_background_of_version_1_Bitcoin_addresses
+  const char *privkeyStr = "18e14a7b6a307f426a94f8114701e7c8e774e7f9a47e2c2035db29a206321725";
+  const char *expectedPubkeyStr = "50863ad64a87ae8a2fe83c1af1a8403cb53f53e486d8511dad8a04887e5b23522cd470243453a299fa9e77237716103abc11a1df38855ed6f2ee187e9c582ba6";
+  const char *expectedSHA256Str =                   "600ffe422b4e00731a59557a5cca46cc183944191006324a447bdb2d98d4b408";
+  const char *expectedRipemd160Str  =   "010966776006953d5567439e5e39f86a0d273bee";
+  const char *expectedERipemd160Str = "00010966776006953d5567439e5e39f86a0d273bee";
+  const char *expectedERipemd160_sha256_Str        = "445c7a8007a93d8733188288bb320a8fe2debd2ae1b47f0f50bc10bae845c094";
+  const char *expectedERipemd160_sha256_sha256_Str = "d61967f63c7dd183914a4ae452c9f6ad5d462ce3d277798075b107615c1a8a30";
+  const char *expectedChecksumStr = "d61967f6";
+  const char *expectedAddressStr = "00010966776006953d5567439e5e39f86a0d273beed61967f6";
+  
+  const unsigned char privkey[] = {
+    0x18,0xE1,0x4A,0x7B, 0x6A,0x30,0x7F,0x42,
+    0x6A,0x94,0xF8,0x11, 0x47,0x01,0xE7,0xC8,
+    0xE7,0x74,0xE7,0xF9, 0xA4,0x7E,0x2C,0x20,
+    0x35,0xDB,0x29,0xA2, 0x06,0x32,0x17,0x25
+  };
+  const unsigned char pubkey[] = {
+    0x50,0x86,0x3a,0xd6, 0x4a,0x87,0xae,0x8a,
+    0x2f,0xe8,0x3c,0x1a, 0xf1,0xa8,0x40,0x3c,
+    0xb5,0x3f,0x53,0xe4, 0x86,0xd8,0x51,0x1d,
+    0xad,0x8a,0x04,0x88, 0x7e,0x5b,0x23,0x52,
+    0x2c,0xd4,0x70,0x24, 0x34,0x53,0xa2,0x99,
+    0xfa,0x9e,0x77,0x23, 0x77,0x16,0x10,0x3a,
+    0xbc,0x11,0xa1,0xdf, 0x38,0x85,0x5e,0xd6,
+    0xf2,0xee,0x18,0x7e, 0x9c,0x58,0x2b,0xa6
+  };
+  const unsigned char ripemd160[] = {
+    0x01,0x09,0x66,0x77, 0x60,0x06,0x95,0x3D,
+    0x55,0x67,0x43,0x9E, 0x5E,0x39,0xF8,0x6A,
+    0x0D,0x27,0x3B,0xEE
+  };
+  const unsigned char eripemd160[] = {
+    0x00,0x01,0x09,0x66, 0x77,0x60,0x06,0x95,
+    0x3D,0x55,0x67,0x43, 0x9E,0x5E,0x39,0xF8,
+    0x6A,0x0D,0x27,0x3B, 0xEE
+  };
+  const unsigned char eripemd160_sha256[] = {
+    0x44,0x5C,0x7A,0x80, 0x07,0xA9,0x3D,0x87,
+    0x33,0x18,0x82,0x88, 0xBB,0x32,0x0A,0x8F,
+    0xE2,0xDE,0xBD,0x2A, 0xE1,0xB4,0x7F,0x0F,
+    0x50,0xBC,0x10,0xBA, 0xE8,0x45,0xC0,0x94
+  };
+  const unsigned char eripemd160_sha256_sha256[] = {
+    0xD6,0x19,0x67,0xF6, 0x3C,0x7D,0xD1,0x83,
+    0x91,0x4A,0x4A,0xE4, 0x52,0xC9,0xF6,0xAD,
+    0x5D,0x46,0x2C,0xE3, 0xD2,0x77,0x79,0x80,
+    0x75,0xB1,0x07,0x61, 0x5C,0x1A,0x8A,0x30
+  };
+  const unsigned char address[] = {
+    0x00,0x01,0x09,0x66, 0x77,0x60,0x06,0x95,
+    0x3D,0x55,0x67,0x43, 0x9E,0x5E,0x39,0xF8,
+    0x6A,0x0D,0x27,0x3B, 0xEE,0xD6,0x19,0x67,
+    0xF6
+  };
+  const unsigned char checksum[] = {
+    0xD6,0x19,0x67,0xF6
+  };
+  
+  printf("INFO:tests: SHA256_DIGEST_LENGTH = %i\n", SHA256_DIGEST_LENGTH);
+  
+  char hexTestBuf[65];
+  const char *hexTestStr = toHexString(hexTestBuf, privkey, 32);
+  if ((strlen(hexTestStr) != 64) || (strcmp(hexTestStr, privkeyStr) != 0)) {
+    printf("hexTestStr: %s\n", hexTestStr);
+    printf("privkeyStr: %s\n", privkeyStr);
+    printf("ERROR:tests: test of toHexString returned unexpected result!\n");
+    printf("\n");
+    exit(-1);
+  }
+  
+  char pubkeyStrBuf[129];
+  const char *pubkeyStr = pubFromPrivPython(pubkeyStrBuf, 129, privkeyStr);
+  if (pubkeyStr == 0) {
+    printf("ERROR:tests: test of pub-from-priv.py failed!\n");
+    printf("ERROR:tests: Please make sure the python program called pub-from-priv.py is in pwd\n");
+    printf("ERROR:tests: Please make sure that pub-from-priv.py is executable (chmod a+x pub-from-priv.py)\n");
+    printf("\n");
+    exit(-1);
+  }
+  
+  if ((strlen(pubkeyStr) != strlen(expectedPubkeyStr)) || (strcmp(pubkeyStr, expectedPubkeyStr) != 0)) {
+    printf("pubkeyStr  : %s\n", pubkeyStr);
+    printf("expected: %s\n", expectedPubkeyStr);
+    printf("ERROR:tests: test of pub-from-priv.py returned unexpected result!\n");
+    printf("ERROR:tests: Please make sure the python program called pub-from-priv.py is in pwd\n");
+    printf("ERROR:tests: Please make sure that pub-from-priv.py is executable (chmod a+x pub-from-priv.py)\n");
+    printf("\n");
+    exit(-1);
+  }
+
+  unsigned char pubkeyHex[65];
+  pubkeyHex[64] = 0x7f;
+  const unsigned char *pubkeyTest = fromHexString(pubkeyHex, pubkeyStr, 128);
+  if (pubkeyHex[64] != 0x7f) {
+    printf("ERROR:tests: fromHexString overwrote the supplied buffer\n");
+    exit(-1);
+  }
+  if (memcmp(pubkeyTest, pubkey, 64) != 0) {
+    printf("ERROR:tests: fromHexString returned unexpected data\n");
+    exit(-1);
+  }
+  
+  char cryptoStrBuf[130];
+  cryptoStrBuf[129] = 0x7f;
+  const char *cryptoStr = pubFromPriv(cryptoStrBuf, 129, privkey);
+  if (cryptoStrBuf[129] != 0x7f) {
+    printf("ERROR:tests: pubFromPriv overwrote the supplied buffer\n");
+    exit(-1);
+  }
+  if ((strlen(cryptoStr) != strlen(pubkeyStr)) || (strcmp(cryptoStr, pubkeyStr) != 0)) {
+    printf("pubkeyStr  : %s\n", pubkeyStr);
+    printf("cryptoStr: %s\n", cryptoStr);
+    printf("ERROR:tests: test of crypto-based pubkey from privkey returned unexpected result!\n");
+    printf("\n");
+    exit(-1);
+  }
+
+  unsigned char epubkey[65];
+  epubkey[0] = 0x04;
+  memcpy(epubkey+1, pubkey, 64);
+  
+  unsigned char sha256Buf[SHA256_DIGEST_LENGTH+2];
+  sha256Buf[SHA256_DIGEST_LENGTH+1] = 0xcc;
+  const unsigned char *sha256 = SHA256Hash(sha256Buf, epubkey, 65);
+  if (sha256Buf[SHA256_DIGEST_LENGTH+1] != 0xcc) {
+    printf("ERROR:tests: SHA256Hash overwrote the supplied buffer\n");
+    exit(-1);
+  }
+  char sha256StrBuf[SHA256_DIGEST_LENGTH*2+2];
+  sha256StrBuf[SHA256_DIGEST_LENGTH*2+1] = 0x7f;
+  const char *sha256Str = toHexString(sha256StrBuf, sha256, SHA256_DIGEST_LENGTH);
+  if (sha256StrBuf[SHA256_DIGEST_LENGTH*2+1] != 0x7f) {
+    printf("ERROR:tests: toHexString of sha256 overwrote the supplied buffer\n");
+    exit(-1);
+  }
+  if (strcmp(sha256Str, expectedSHA256Str) != 0) {
+    printf("sha256Str        : %s\n", sha256Str);
+    printf("expectedSHA256Str: %s\n", expectedSHA256Str);
+    printf("ERROR:tests: test of SHA256 generation from pubkey returned unexpected result!\n");
+    printf("\n");
+    exit(-1);
+  }
+
+  {
+    unsigned char ripemd160Buf[RIPEMD160_DIGEST_LENGTH+2];
+    ripemd160Buf[RIPEMD160_DIGEST_LENGTH+1] = 0xcc;
+    const unsigned char *ripemd160Test = ripemd160Hash(ripemd160Buf, sha256, SHA256_DIGEST_LENGTH);
+    if (ripemd160Buf[RIPEMD160_DIGEST_LENGTH+1] != 0xcc) {
+      printf("ERROR:tests: ripemd160Hash sha256 overwrote the supplied buffer\n");
+      exit(-1);
+    }
+    if (memcmp(ripemd160, ripemd160Test, RIPEMD160_DIGEST_LENGTH) != 0) {
+      printf("ERROR:tests: ripemd160Hash returned unexpected data\n");
+      exit(-1);
+    }
+    char ripemd160StrBuf[RIPEMD160_DIGEST_LENGTH*2+2];
+    ripemd160StrBuf[RIPEMD160_DIGEST_LENGTH*2+1] = 0x7f;
+    const char *ripemd160Str = toHexString(ripemd160StrBuf, ripemd160Test, RIPEMD160_DIGEST_LENGTH);
+    if (ripemd160StrBuf[RIPEMD160_DIGEST_LENGTH*2+1] != 0x7f) {
+      printf("ERROR:tests: toHexString of ripemd160Test overwrote the supplied buffer\n");
+      exit(-1);
+    }
+    if (strcmp(ripemd160Str, expectedRipemd160Str) != 0) {
+      printf("ripemd160Str        : %s\n", ripemd160Str);
+      printf("expectedRipemd160Str: %s\n", expectedRipemd160Str);
+      printf("ERROR:tests: test of ripemd160 generation from sha256 returned unexpected result!\n");
+      printf("\n");
+      exit(-1);
+    }
+  }
+
+  {
+    unsigned char eripemd160Buf[RIPEMD160_DIGEST_LENGTH+3];
+    unsigned char *ripemd160Buf = eripemd160Buf + 1;
+    eripemd160Buf[0] = 0;
+    ripemd160Buf[RIPEMD160_DIGEST_LENGTH+1] = 0xcc;
+    ripemd160Hash(ripemd160Buf, sha256, SHA256_DIGEST_LENGTH);
+    unsigned char *eripemd160Test = eripemd160Buf;
+    if (eripemd160Buf[0] != 0) {
+      printf("ERROR:tests: ripemd160Hash sha256 underwrote the supplied buffer\n");
+      exit(-1);
+    }
+    if (ripemd160Buf[RIPEMD160_DIGEST_LENGTH+1] != 0xcc) {
+      printf("ERROR:tests: ripemd160Hash sha256 overwrote the supplied buffer\n");
+      exit(-1);
+    }
+    if (memcmp(eripemd160, eripemd160Test, RIPEMD160_DIGEST_LENGTH+1) != 0) {
+      printf("ERROR:tests: ripemd160Hash returned unexpected data for the network prepend case\n");
+      exit(-1);
+    }
+    char eripemd160StrBuf[(RIPEMD160_DIGEST_LENGTH+1)*2+2];
+    eripemd160StrBuf[(RIPEMD160_DIGEST_LENGTH+1)*2+1] = 0x7f;
+    const char *eripemd160Str = toHexString(eripemd160StrBuf, eripemd160Test, RIPEMD160_DIGEST_LENGTH+1);
+    if (eripemd160StrBuf[(RIPEMD160_DIGEST_LENGTH+1)*2+1] != 0x7f) {
+      printf("ERROR:tests: toHexString of eripemd160Test overwrote the supplied buffer\n");
+      exit(-1);
+    }
+    if (strcmp(eripemd160Str, expectedERipemd160Str) != 0) {
+      printf("eripemd160Str        : %s\n", eripemd160Str);
+      printf("expectedERipemd160Str: %s\n", expectedERipemd160Str);
+      printf("ERROR:tests: test of ripemd160 generation from sha256 for network prepend case returned unexpected result!\n");
+      printf("\n");
+      exit(-1);
+    }
+    
+    unsigned char eripemd160_sha256Buf[SHA256_DIGEST_LENGTH+2];
+    eripemd160_sha256Buf[SHA256_DIGEST_LENGTH+1] = 0xcc;
+    const unsigned char *eripemd160_sha256Test = SHA256Hash(eripemd160_sha256Buf, eripemd160Test, RIPEMD160_DIGEST_LENGTH+1);
+    if (eripemd160_sha256Buf[SHA256_DIGEST_LENGTH+1] != 0xcc) {
+      printf("ERROR:tests: SHA256Hash overwrote the supplied buffer for eripemd160_sha256\n");
+      exit(-1);
+    }
+    if (memcmp(eripemd160_sha256Test, eripemd160_sha256, SHA256_DIGEST_LENGTH) != 0) {
+      printf("ERROR:tests: SHA256Hash returned unexpected data for eripemd160\n");
+      exit(-1);
+    }
+    char eripemd160_sha256_StrBuf[SHA256_DIGEST_LENGTH*2+2];
+    eripemd160_sha256_StrBuf[SHA256_DIGEST_LENGTH*2+1] = 0x7f;
+    const char *eripemd160_sha256_Str = toHexString(eripemd160_sha256_StrBuf, eripemd160_sha256Test, SHA256_DIGEST_LENGTH);
+    if (strcmp(eripemd160_sha256_Str, expectedERipemd160_sha256_Str) != 0) {
+      printf("eripemd160_sha256_Str        : %s\n", eripemd160_sha256_Str);
+      printf("expectedERipemd160_sha256_Str: %s\n", expectedERipemd160_sha256_Str);
+      printf("ERROR:tests: test of sha256 generation from eripemd160 returned unexpected result!\n");
+      printf("\n");
+      exit(-1);
+    }
+    
+    unsigned char eripemd160_sha256_sha256Buf[SHA256_DIGEST_LENGTH+2];
+    eripemd160_sha256_sha256Buf[SHA256_DIGEST_LENGTH+1] = 0xcc;
+    const unsigned char *eripemd160_sha256_sha256Test = SHA256Hash(eripemd160_sha256_sha256Buf, eripemd160_sha256Test, SHA256_DIGEST_LENGTH);
+    if (eripemd160_sha256_sha256Buf[SHA256_DIGEST_LENGTH+1] != 0xcc) {
+      printf("ERROR:tests: SHA256Hash overwrote the supplied buffer for eripemd160_sha256_sha256\n");
+      exit(-1);
+    }
+    if (memcmp(eripemd160_sha256_sha256Test, eripemd160_sha256_sha256, SHA256_DIGEST_LENGTH) != 0) {
+      printf("ERROR:tests: SHA256Hash returned unexpected data for ripemd160_sha256\n");
+      exit(-1);
+    }
+    char eripemd160_sha256_sha256_StrBuf[SHA256_DIGEST_LENGTH*2+2];
+    eripemd160_sha256_sha256_StrBuf[SHA256_DIGEST_LENGTH*2+1] = 0x7f;
+    const char *eripemd160_sha256_sha256_Str = toHexString(eripemd160_sha256_sha256_StrBuf, eripemd160_sha256_sha256Test, SHA256_DIGEST_LENGTH);
+    if (strcmp(eripemd160_sha256_sha256_Str, expectedERipemd160_sha256_sha256_Str) != 0) {
+      printf("eripemd160_sha256_sha256_Str        : %s\n", eripemd160_sha256_sha256_Str);
+      printf("expectedERipemd160_sha256_sha256_Str: %s\n", expectedERipemd160_sha256_sha256_Str);
+      printf("ERROR:tests: test of sha256 generation from sha256 of ripemd160 returned unexpected result!\n");
+      printf("\n");
+      exit(-1);
+    }
+
+    unsigned char checksumTest[4];
+    checksumTest[0] = eripemd160_sha256_sha256Test[0];
+    checksumTest[1] = eripemd160_sha256_sha256Test[1];
+    checksumTest[2] = eripemd160_sha256_sha256Test[2];
+    checksumTest[3] = eripemd160_sha256_sha256Test[3];
+    if (memcmp(checksum, checksumTest, 4) != 0) {
+      printf("ERROR:tests: checksum is wrong\n");
+      exit(-1);
+    }
+    char checksumStrBuf[10];
+    const char *checksumStr = toHexString(checksumStrBuf, checksumTest, 4);
+    if (strcmp(checksumStr, expectedChecksumStr) != 0) {
+      printf("checksumStr: %s\n", checksumStr);
+      printf("expectedChecksumStr: %s\n", expectedChecksumStr);
+      printf("ERROR:tests: checksum is wrong\n");
+      exit(-1);
+    }
+    
+    unsigned char addressTest[ADDRESS_LENGTH+1];
+    addressTest[ADDRESS_LENGTH] = 0xcc;
+    memcpy(addressTest, eripemd160Test, RIPEMD160_DIGEST_LENGTH+1);
+    memcpy(addressTest+RIPEMD160_DIGEST_LENGTH+1, checksum, 4);
+    if (addressTest[ADDRESS_LENGTH] != 0xcc) {
+      printf("ERROR:tests: assembly of the address overwrote the buffer\n");
+      exit(-1);
+    }
+    if (memcmp(addressTest, address, ADDRESS_LENGTH) != 0) {
+      printf("ERROR:tests: address is wrong\n");
+      exit(-1);
+    }
+    char address_StrBuf[ADDRESS_LENGTH*2+2];
+    address_StrBuf[ADDRESS_LENGTH*2+1] = 0x7f;
+    const char *addressStr = toHexString(address_StrBuf, addressTest, ADDRESS_LENGTH);
+    if (strcmp(addressStr, expectedAddressStr) != 0) {
+      printf("addressStr        : %s\n", addressStr);
+      printf("expectedAddressStr: %s\n", expectedAddressStr);
+      printf("ERROR:tests: test of address assembly returned unexpected result!\n");
+      printf("\n");
+      exit(-1);
+    }
+  }
+}
+
+
 int main(int argc, char** argv) {
 	tests();
 	printf("INFO:main: all preliminary tests passed; continuing!\n\n");
@@ -590,7 +952,7 @@ int main(int argc, char** argv) {
 	u_int32_t flags; int ret;
 	num_recovered = num_pend_pub = num_pend_pub_comp = num_pend_priv = num_dups = 0;
 	if(argc < 2 || argc > 3) {
-		printf("bitcoin-wallet-recover v0.3d\n");
+		printf("bitcoin-wallet-recover v1.5d\n");
 		printf("(C) 2011-2012 Aidan Thornton. All rights reserved.\n");
 		printf("(C) 2017 Joe Cicchiello; modified to be much more verbose\n");
 		printf("See LICENSE.txt for full copyright and licensing information\n");
