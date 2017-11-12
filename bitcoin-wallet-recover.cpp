@@ -403,11 +403,12 @@ static void dumpPotentialPrivkey(unsigned char* pprivkey) {
   char addressBase58Buf[50]; // will be something less than 25 characters
   const char *addressBase58 = toBase58String(addressBase58Buf, address, 25);
   
-  printf("RESULT:dumpPotentialPrivkey: privkey,pubkey,address = %s,%s,%s\n",pprivkeyStr, ppubkeyStr, addressBase58);
+  //printf("RESULT:dumpPotentialPrivkey: privkey,pubkey,address = %s,%s,%s\n",pprivkeyStr, ppubkeyStr, addressBase58);
+  printf("CSV,%s,%s,%s\n", pprivkeyStr, ppubkeyStr, addressBase58);
 }
 
 static void dumpPotentialPubkey(const unsigned char* ppubkey) {
-  char ppubkeyStrBuf[64+1];
+  char ppubkeyStrBuf[64*2+1];
   const char *ppubkeyStr = toHexString(ppubkeyStrBuf, ppubkey, 64);
   
   unsigned char addressBuf[ADDRESS_LENGTH+1];
@@ -416,7 +417,8 @@ static void dumpPotentialPubkey(const unsigned char* ppubkey) {
   char addressBase58Buf[50]; // will be something less than 25 characters
   const char *addressBase58 = toBase58String(addressBase58Buf, address, 25);
   
-  printf("RESULT:dumpPotentialPubkey: privkey,pubkey,address = UNKNOWN,%s,%s\n", ppubkeyStr, addressBase58);
+  //printf("RESULT:dumpPotentialPubkey: privkey,pubkey,address = UNKNOWN,%s,%s\n", ppubkeyStr, addressBase58);
+  printf("CSV,UNKNOWN,%s,%s\n", ppubkeyStr, addressBase58);
 }
 
 
@@ -1017,10 +1019,12 @@ int main(int argc, char** argv) {
 	tests();
 	printf("INFO:main: all preliminary tests passed; continuing!\n\n");
 	
+	printf("CSV,privkey,pubkey,address\n");
+	
 	u_int32_t flags; int ret;
 	num_recovered = num_pend_pub = num_pend_pub_comp = num_pend_priv = num_dups = 0;
 	if(argc < 2 || argc > 3) {
-		printf("bitcoin-wallet-recover v1.5d\n");
+		printf("bitcoin-wallet-recover v1.6\n");
 		printf("(C) 2011-2012 Aidan Thornton. All rights reserved.\n");
 		printf("(C) 2017 Joe Cicchiello; modified to be much more verbose\n");
 		printf("See LICENSE.txt for full copyright and licensing information\n");
