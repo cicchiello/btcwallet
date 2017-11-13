@@ -1,0 +1,10 @@
+this is (apparently) the record of interest!
+
+{
+            "addr": "1J1keDA5Bpej8XYTWGDN8imxNf9LkRV3wS", 
+            "compressed": false, 
+            "encrypted_privkey": "dc4c7acc3805b2aee9434919b09bbe3712163d2b7c6b110a47d555beec9773c6aa3b0de01bbc69c01aaab19d7bd48695", 
+            "label": "TradeHill", 
+            "pubkey": "04f0640a42e8a5f63d7ad19c3d3385b958b5e8f99bbd05d355071f724ae9789299713c9dd4d1fa29a7ac6f52eb55c1d44c17f226de1ba38e3e1246c3cfce76f2df", 
+            "reserve": 0
+        }, 

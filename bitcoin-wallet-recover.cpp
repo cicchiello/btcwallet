@@ -636,6 +636,8 @@ static void do_recover_pubkey_j() {
 	if(bufpos_priv < 0) 
 		return;
 
+	dumpPotentialPrivkey(buf+bufpos_priv);
+	
 	do_recover_pubkey_uncomp(bufpos);
 	do_recover_privkey(bufpos_priv);
 }
@@ -1024,7 +1026,7 @@ int main(int argc, char** argv) {
 	u_int32_t flags; int ret;
 	num_recovered = num_pend_pub = num_pend_pub_comp = num_pend_priv = num_dups = 0;
 	if(argc < 2 || argc > 3) {
-		printf("bitcoin-wallet-recover v1.6\n");
+		printf("bitcoin-wallet-recover v1.7\n");
 		printf("(C) 2011-2012 Aidan Thornton. All rights reserved.\n");
 		printf("(C) 2017 Joe Cicchiello; modified to be much more verbose\n");
 		printf("See LICENSE.txt for full copyright and licensing information\n");
