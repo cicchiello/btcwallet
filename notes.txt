@@ -1,10 +1,38 @@
-this is (apparently) the record of interest!
+wallet-recover:
+    Usage: wallet-recover <file> [<new wallet>]
 
-{
-            "addr": "1J1keDA5Bpej8XYTWGDN8imxNf9LkRV3wS", 
-            "compressed": false, 
-            "encrypted_privkey": "dc4c7acc3805b2aee9434919b09bbe3712163d2b7c6b110a47d555beec9773c6aa3b0de01bbc69c01aaab19d7bd48695", 
-            "label": "TradeHill", 
-            "pubkey": "04f0640a42e8a5f63d7ad19c3d3385b958b5e8f99bbd05d355071f724ae9789299713c9dd4d1fa29a7ac6f52eb55c1d44c17f226de1ba38e3e1246c3cfce76f2df", 
-            "reserve": 0
-        }, 
+
+brute:
+  This program scans the given file, looking at every byte as though it's the
+  first byte of the private key.  It uses that key to derive the public key and
+  address, and if the derived public key matches the supplied public key, it
+  prints all 3.
+
+  Usage: brute <file> {<pubkey>}
+     where: <file>     is the path to any file
+            <pubkey>   is the public key that we're looking for; there is a 
+	               meaningless (giberish) default value for testing.
+		       
+  This program is surprisingly slow, due to the significant cpu-intensive work
+  to repeatedly derive keys and addresses.
+  
+
+brute2:
+  This program scans the given file, looking for breadcrumbs that indicate the
+  start of a private or public key sequence.  For private key cases, it pulls
+  that key, then derives the public key and address.  For public key cases, it
+  derives the address.  If no pubkey is supplied on the command line, all cases
+  will be printed out.  If a pubkey is supplied on the command line, only cases
+  where a match can be established will produce output.
+
+  Usage: brute2 <file> {<pubkey>}
+  
+  This program is much faster than brute, since relatively few cases will be
+  considered.
+
+  Cases:
+     0x01 0x01 0x04 0x20        Marker for private keys
+     0x6b 0x65 0x79 0x41 0x04   Marker for pub keys
+     0x03 0x42 0x00 0x04        Marker for pub keys
+
+
