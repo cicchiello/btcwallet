@@ -243,22 +243,34 @@ static void tryPrivkeyCandidate(unsigned char *pprivkey, int bufpos) {
 }
 
 static void tryPubkeyCandidate(unsigned char *ppubkey, int bufpos) {
-  num_recovered++;
-  char ppubkeyStrBuf[129];
-  const char *ppubkeyStr = toHexString(ppubkeyStrBuf, ppubkey, 64);
+  bool reportIt = !expectedPubkey || 
+    ((ppubkey[0] == expectedPubkey[0]) &&
+     (ppubkey[1] == expectedPubkey[1]) &&
+     (ppubkey[2] == expectedPubkey[2]) &&
+     (ppubkey[3] == expectedPubkey[3]) &&
+     (ppubkey[4] == expectedPubkey[4]) &&
+     (ppubkey[5] == expectedPubkey[5]) &&
+     (ppubkey[6] == expectedPubkey[6]) &&
+     (ppubkey[7] == expectedPubkey[7]));
   
-  unsigned char addressBuf[ADDRESS_LENGTH+1];
-  const unsigned char *address = addressFromPub(addressBuf, ppubkey, 64);
-  
-  char addressBase58Buf[50]; // will be something less than 25 characters
-  const char *addressBase58 = toBase58String(addressBase58Buf, address, 25);
-  
-  printf("CSV,%d,UNKNOWN,%s,%s\n", bufpos, ppubkeyStr, addressBase58);
+  if (reportIt) {
+    num_recovered++;
+    char ppubkeyStrBuf[129];
+    const char *ppubkeyStr = toHexString(ppubkeyStrBuf, ppubkey, 64);
+    
+    unsigned char addressBuf[ADDRESS_LENGTH+1];
+    const unsigned char *address = addressFromPub(addressBuf, ppubkey, 64);
+    
+    char addressBase58Buf[50]; // will be something less than 25 characters
+    const char *addressBase58 = toBase58String(addressBase58Buf, address, 25);
+    
+    printf("CSV,%d,UNKNOWN,%s,%s\n", bufpos, ppubkeyStr, addressBase58);
+  }
 }
 
 static inline bool isCase1(unsigned char *buf) {
-  static const unsigned char breadcrumb[] = {0x01,0x01,0x04,0x20};
-  return memcmp(buf, breadcrumb, 4) == 0;
+  static const unsigned char breadcrumb[] = {0x01,0x04,0x20};
+  return memcmp(buf, breadcrumb, 3) == 0;
 }
 
 
@@ -274,13 +286,16 @@ static inline bool isCase3(unsigned char *buf) {
 }
 
 
+
+
+
 static void do_scan(void) {
   int flg = 1, cnt = 0;
   while(flg || bufpos < buffill) {
     flg = refill_buf();
-    if ((bufpos < buffill-36) && isCase1(&buf[bufpos])){
+    if ((bufpos < buffill-35) && isCase1(&buf[bufpos])){
       //printf("INFO: trying; bufpos: %d, buffill: %d\n", bufpos, buffill);
-      tryPrivkeyCandidate(&buf[bufpos+4], cnt+4);
+      tryPrivkeyCandidate(&buf[bufpos+3], cnt+3);
     } else if ((bufpos < buffill-37) && isCase2(&buf[bufpos])){
       tryPubkeyCandidate(&buf[bufpos+5], cnt+5);
     } else if ((bufpos < buffill-36) && isCase3(&buf[bufpos])){
@@ -293,7 +308,7 @@ static void do_scan(void) {
 }
 
 static void usage(const char **argv) {
-  printf("%s v1.0\n", argv[0]);
+  printf("%s v1.1\n", argv[0]);
   printf("(C) 2017 Joe Cicchiello. All rights reserved.\n");
   printf("loosely derived from the work of Aidan Thornton.\n");
   printf("See LICENSE.txt for full copyright and licensing information\n");
