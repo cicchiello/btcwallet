@@ -211,7 +211,7 @@ static const unsigned char *addressFromPub(unsigned char *addressBuf, const unsi
 static const unsigned char *expectedPubkey = 0;
 
 
-static void tryPrivkeyCandidate(unsigned char *pprivkey, int bufpos) {
+static void tryPrivkeyCandidate(unsigned char *pprivkey, long pos) {
   unsigned char ppubkeyBuf[65];
   const unsigned char *ppubkey = pubFromPriv(ppubkeyBuf, pprivkey);
 
@@ -238,11 +238,11 @@ static void tryPrivkeyCandidate(unsigned char *pprivkey, int bufpos) {
     
     char hexBuf[32*2+1];
     const char *pprivkeyStr = toHexString(hexBuf, pprivkey, 32);
-    printf("CSV,%d,%s,%s,%s\n", bufpos, pprivkeyStr, ppubkeyStr, addressBase58);
+    printf("CSV,%ld,%s,%s,%s\n", pos, pprivkeyStr, ppubkeyStr, addressBase58);
   }
 }
 
-static void tryPubkeyCandidate(unsigned char *ppubkey, int bufpos) {
+static void tryPubkeyCandidate(unsigned char *ppubkey, long pos) {
   bool reportIt = !expectedPubkey || 
     ((ppubkey[0] == expectedPubkey[0]) &&
      (ppubkey[1] == expectedPubkey[1]) &&
@@ -264,7 +264,7 @@ static void tryPubkeyCandidate(unsigned char *ppubkey, int bufpos) {
     char addressBase58Buf[50]; // will be something less than 25 characters
     const char *addressBase58 = toBase58String(addressBase58Buf, address, 25);
     
-    printf("CSV,%d,UNKNOWN,%s,%s\n", bufpos, ppubkeyStr, addressBase58);
+    printf("CSV,%ld,UNKNOWN,%s,%s\n", pos, ppubkeyStr, addressBase58);
   }
 }
 
@@ -290,7 +290,8 @@ static inline bool isCase3(unsigned char *buf) {
 
 
 static void do_scan(void) {
-  int flg = 1, cnt = 0;
+  int flg = 1;
+  long cnt = 0;
   while(flg || bufpos < buffill) {
     flg = refill_buf();
     if ((bufpos < buffill-35) && isCase1(&buf[bufpos])){
@@ -302,7 +303,7 @@ static void do_scan(void) {
       tryPubkeyCandidate(&buf[bufpos+4], cnt+4);
     }
     bufpos++;
-    if (++cnt % 5000 == 0) printf("INFO: byte cnt: %d\n", cnt);
+    if (++cnt % 5000 == 0) printf("INFO: byte cnt: %ld\n", cnt);
     refill_buf();
   }
 }
