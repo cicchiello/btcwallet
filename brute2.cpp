@@ -309,7 +309,7 @@ static void do_scan(void) {
 }
 
 static void usage(const char **argv) {
-  printf("%s v1.1\n", argv[0]);
+  printf("%s v1.2\n", argv[0]);
   printf("(C) 2017 Joe Cicchiello. All rights reserved.\n");
   printf("loosely derived from the work of Aidan Thornton.\n");
   printf("See LICENSE.txt for full copyright and licensing information\n");
